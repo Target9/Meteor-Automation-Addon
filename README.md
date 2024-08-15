@@ -13,7 +13,7 @@ A addon that allows automation for farming on big servers and much more.
 - Or just download from the releases.
 
 ## Common Problems
-Right now theres no problems.
+Right now there's no problems.
 
 ## Resources
 Here will be links to discord and a website dedicated to Meteor Automation.
