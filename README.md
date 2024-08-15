@@ -3,7 +3,7 @@
 A addon that allows automation for farming on big servers and much more.
 
 # IMPORTANT
-<h2>This version is 1.21.1 fabric.</h2>
+## This version is 1.21.1 fabric.</h2>
 
 ### How to use:  
 - Clone this project.
