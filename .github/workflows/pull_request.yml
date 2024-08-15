@@ -1,0 +1,32 @@
+name: Build Pull Request Artifacts
+on: pull_request
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Wrapper Validation
+        uses: gradle/actions/wrapper-validation@v3
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: 'temurin'
+      - name: Dependency Caching # Taken from github.com/FlorianMichael/BaseProject
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+      - name: Build with Gradle
+        run: ./gradlew build -Pcommit=${{ github.sha }}
+      - name: Release
+        uses: actions/upload-artifact@v4
+        with:
+          name: Artifacts
+          path: build/libs/
