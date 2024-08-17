@@ -1,9 +1,9 @@
 package com.meteor.automation.modules;
 
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.systems.modules.Modules; // Importing the Modules class
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 
@@ -13,23 +13,39 @@ import net.minecraft.client.MinecraftClient;
 
 import com.meteor.automation.MeteorAutomation;
 import com.meteor.automation.utils.LogUtils;
+import com.meteor.automation.utils.DiscordWebhook; // Import your DiscordWebhook class
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.List;
 
 public class MoveTriggerModule extends Module {
-    private BlockPos lastPosition;
+    private BlockPos lastPosition; // Store the player's last position
+    private DiscordWebhook webhook; // Save the webhook instance
+    private final File configDirectory = new File(System.getProperty("user.home"), "DiscordNotifiers"); // Directory for config
+    private final File webhookFile = new File(configDirectory, "discord_webhook.txt"); // Webhook file path
 
     // Use a StringListSetting to manage chat messages that will act as commands
     private final Setting<List<String>> chatCommands = settings.getDefaultGroup().add(new StringListSetting.Builder()
         .name("chat-commands")
         .description("List of commands to execute upon movement.")
-        .defaultValue(List.of("/say You moved!")) // Sample command
+        .defaultValue(List.of("You moved!")) // Sample command
         .build()
     );
+
+    // New toggle setting to control sending messages to Discord
+    public Setting<Boolean> sendToDiscord = settings.getDefaultGroup().add(new BoolSetting.Builder()
+        .name("send-to-discord")
+        .description("Toggle to send messages to Discord upon movement.")
+        .defaultValue(true) // Default is true, can adjust as needed
+        .build());
 
     public MoveTriggerModule() {
         super(MeteorAutomation.UTILITY, "move-trigger", "Triggers actions when the player moves.");
         lastPosition = null; // Initialize lastPosition to null at startup
+        loadWebhookFromFile(); // Load the webhook URL from the file
     }
 
     // Setting groups and settings for the module
@@ -40,31 +56,30 @@ public class MoveTriggerModule extends Module {
         .defaultValue(true)
         .build());
 
-    public Setting<Boolean> disableModules = sgGeneral.add(new BoolSetting.Builder()
-        .name("disable-modules")
-        .description("Disable specific modules upon movement.")
-        .defaultValue(true)
-        .build());
-
-    public Setting<String> modulesToDisable = sgGeneral.add(new StringSetting.Builder()
-        .name("modules-to-disable")
-        .description("Comma-separated list of modules to disable.")
-        .defaultValue("exampleModule1,exampleModule2") // Replace with actual module names
+    public Setting<Boolean> disableOnLeave = sgGeneral.add(new BoolSetting.Builder() // New setting to control module disable on leave
+        .name("disable-on-leave")
+        .description("Disable this module when the game is left.")
+        .defaultValue(true) // Default is true, can adjust as needed
         .build());
 
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onTick(TickEvent.Post event) {
         if (mc.player != null) {
-            PlayerEntity player = mc.player;
-            BlockPos currentPosition = player.getBlockPos();
+            PlayerEntity player = mc.player; // Get the player entity
+            BlockPos currentPosition = player.getBlockPos(); // Get the player's current position
 
             // Check if the player has moved (by checking if the position has changed)
             if (lastPosition == null || !currentPosition.equals(lastPosition)) {
                 lastPosition = currentPosition; // Update last known position
 
+                // Check if messages should be sent to Discord
+                if (sendToDiscord.get()) {
+                    sendDiscordMessage(player.getName().getString() + " has moved!"); // Customize the message as needed
+                }
+
                 // Execute all commands immediately upon movement
                 if (enableChatMessage.get()) {
-                    sendAllChatCommands();
+                    sendAllChatCommands(); // Send commands when the player moves
                 }
             }
         }
@@ -79,30 +94,40 @@ public class MoveTriggerModule extends Module {
         }
     }
 
-    private void disableSpecifiedModules() {
-        // Get a comma-separated list of module names and convert it to an array
-        String[] modules = modulesToDisable.get().split(",");
+    private void sendChatCommand(String command) {
+        // Send a packet with the command
+        MinecraftClient.getInstance().player.networkHandler.sendChatMessage(command); // Send the command
+    }
 
-        // Loop through each module name
-        for (String moduleName : modules) {
-            Module foundModule = Modules.get().get(moduleName.trim()); // Find the module by name
-
-            // Disable the module if it is found and active
-            if (foundModule != null) {
-                if (foundModule.isActive()) {
-                    foundModule.toggle(); // Disable the module
-                    LogUtils.info(moduleName.trim() + " module has been disabled.");
-                } else {
-                    LogUtils.warning(moduleName.trim() + " module was already disabled.");
-                }
-            } else {
-                LogUtils.warning("Module " + moduleName.trim() + " not found."); // Log if not found
+    private void sendDiscordMessage(String message) {
+        if (webhook != null) {
+            try {
+                webhook.setContent(message);
+                webhook.execute(); // Send the message to Discord
+                LogUtils.info("Message sent to Discord: " + message); // Log the sent message
+            } catch (IOException e) {
+                LogUtils.error("Failed to send message to Discord: " + e.getMessage());
             }
         }
     }
 
-    private void sendChatCommand(String command) {
-        // Send a packet with the command
-        MinecraftClient.getInstance().player.networkHandler.sendChatMessage(command); // Send the command
+    @EventHandler
+    private void onGameLeft(GameLeftEvent event) {
+        if (disableOnLeave.get()) toggle();
+    }
+
+    // Method to load the webhook from a configuration file
+    private void loadWebhookFromFile() {
+        if (webhookFile.exists()) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(webhookFile))) {
+                String url = reader.readLine();
+                if (url != null && !url.isEmpty()) {
+                    webhook = new DiscordWebhook(url); // Initialize the webhook with the loaded URL
+                    LogUtils.info("Webhook URL loaded from file: " + url);
+                }
+            } catch (IOException e) {
+                LogUtils.error("Failed to load webhook URL from file: " + e.getMessage());
+            }
+        }
     }
 }

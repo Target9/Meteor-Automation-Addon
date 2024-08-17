@@ -22,6 +22,11 @@ import com.meteor.automation.utils.LogUtils;
 import meteordevelopment.meteorclient.systems.friends.Friends; // Import for Friends system
 
 import java.awt.*;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
@@ -31,7 +36,7 @@ public class DiscordNotifier extends Module {
     private final String name = "Meteor Automation Addon";
     private final String avatar = "https://cdn.discordapp.com/attachments/1209202131106537553/1272496116268793856/icon.png?ex=66bb2fdb&is=66b9de5b&hm=447d57b17be5d18584b84b82150b48ceb11f5ce438fcc723dea1ecc8c34916f2&";
 
-    private DiscordWebhook hook;
+    private DiscordWebhook hook; // Private hook variable
 
     // Set to keep track of detected players
     private final Set<PlayerEntity> detectedPlayers = new HashSet<>();
@@ -39,15 +44,31 @@ public class DiscordNotifier extends Module {
     // Define a set of entity types to monitor
     private final Set<EntityType<?>> entitiesToMonitor = new HashSet<>();
 
+    // File to store the webhook URL
+    private final File configDirectory = new File(System.getProperty("user.home"), "DiscordNotifiers"); // Example for user directory
+    private final File webhookFile = new File(configDirectory, "discord_webhook.txt"); // Use the newly created directory
+
     public SettingGroup sgGeneral = settings.getDefaultGroup();
     public SettingGroup sgNotifs = settings.createGroup("Notifications");
 
     public DiscordNotifier() {
         super(MeteorAutomation.UTILITY, "discord-notifier", "Sends notifications to a Discord webhook on certain events.");
 
+        // Setup configuration directory
+        if (!configDirectory.exists()) {
+            configDirectory.mkdirs(); // Create the directory if it does not exist
+        }
+
         // Initialize the set with entity types you want to monitor
         entitiesToMonitor.add(EntityType.PLAYER); // Adding PlayerEntity type to monitor
-        // Add other entity types you wish to monitor here
+
+        // Load the webhook URL from the file if it exists
+        loadWebhookFromFile();
+    }
+
+    // Method to get access to the webhook safely
+    public DiscordWebhook getWebhook() {
+        return hook; // Public getter method for the hook
     }
 
     // Discord webhook settings
@@ -55,6 +76,16 @@ public class DiscordNotifier extends Module {
         .name("webhook-URL")
         .description("Discord Webhook URL to send messages to")
         .defaultValue("")
+        .onChanged(url -> {
+            if (!url.isEmpty()) {
+                // Save the new webhook URL to file
+                saveWebhookToFile(url);
+                hook = new DiscordWebhook(url);
+            } else {
+                LogUtils.info("Invalid webhook URL in DiscordNotifier");
+                this.toggle();
+            }
+        })
         .build());
 
     private final Setting<DiscordNotifier.PingModes> pingMode = sgGeneral.add(new EnumSetting.Builder<DiscordNotifier.PingModes>()
@@ -72,8 +103,8 @@ public class DiscordNotifier extends Module {
 
     // Entity notifier settings
     private final Setting<Boolean> entitiesNotifier = sgNotifs.add(new BoolSetting.Builder()
-        .name("entities-notifier")
-        .description("Toggle notifications for selected entity types")
+        .name("player-notifier")
+        .description("Toggle notifications if a player is found.")
         .defaultValue(true)
         .build());
 
@@ -121,13 +152,8 @@ public class DiscordNotifier extends Module {
 
     @Override
     public void onActivate() {
-        String url = link.get();
-        if (!url.isEmpty()) {
-            hook = new DiscordWebhook(url);
-        } else {
-            LogUtils.info("Invalid webhook URL in DiscordNotifier");
-            this.toggle();
-        }
+        // Load the webhook from file when the module is activated
+        loadWebhookFromFile();
     }
 
     @EventHandler
@@ -251,6 +277,31 @@ public class DiscordNotifier extends Module {
         hook.setContent(mention);
         hook.setAvatarUrl(avatar);
         hook.setUsername(name);
+    }
+
+    private void saveWebhookToFile(String url) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(webhookFile))) {
+            writer.write(url);
+            LogUtils.info("Webhook URL saved to file: " + url);
+        } catch (IOException e) {
+            LogUtils.error("Failed to save webhook URL to file: " + e.getMessage());
+        }
+    }
+
+    private void loadWebhookFromFile() {
+        if (webhookFile.exists()) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(webhookFile))) {
+                String url = reader.readLine();
+                if (url != null && !url.isEmpty()) {
+                    // Set the loaded URL to the Setting group, assuming we have a method to set value correctly
+                    link.set(url);  // Use 'set' instead of 'setValue'
+                    hook = new DiscordWebhook(url);
+                    LogUtils.info("Webhook URL loaded from file: " + url);
+                }
+            } catch (IOException e) {
+                LogUtils.error("Failed to load webhook URL from file: " + e.getMessage());
+            }
+        }
     }
 
     public enum PingModes {
