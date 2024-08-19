@@ -13,6 +13,14 @@ import net.minecraft.client.gui.screen.DisconnectedScreen;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 
+import com.meteor.automation.utils.LogUtils;
+import com.meteor.automation.utils.DiscordWebhook;
+
+import java.awt.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -54,6 +62,26 @@ public class PlayerTriggerModule extends Module {
         .build()
     );
 
+    // Setting to control sending messages to Discord
+    private final Setting<Boolean> sendToDiscord = sgGeneral.add(new BoolSetting.Builder()
+        .name("send-to-discord")
+        .description("Toggle to send messages to Discord upon player detection.")
+        .defaultValue(true)
+        .build()
+    );
+
+    // Setting to control sending messages to chat
+    private final Setting<Boolean> sendToChat = sgGeneral.add(new BoolSetting.Builder()
+        .name("chat")
+        .description("Toggle to send messages to in-game chat upon player detection.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private DiscordWebhook webhook;
+    private final File configDirectory = new File(System.getProperty("user.home"), "DiscordNotifiers");
+    private final File webhookFile = new File(configDirectory, "discord_webhook.txt");
+
     private final Set<PlayerEntity> detectedPlayers = new HashSet<>();
     private final Set<PlayerEntity> playersInCycle = new HashSet<>();
     private int messageIndex = 0;
@@ -61,6 +89,7 @@ public class PlayerTriggerModule extends Module {
 
     public PlayerTriggerModule() {
         super(MeteorAutomation.UTILITY, "player-trigger", "Notifies when a player enters a defined range.");
+        loadWebhookFromFile();
     }
 
     @Override
@@ -103,7 +132,7 @@ public class PlayerTriggerModule extends Module {
                     if (!detectedPlayers.contains(player)) {
                         detectedPlayers.add(player); // Add player to detected list
                         playersInCycle.add(player); // Add player to cycle list
-                        handlePlayerEnter();
+                        handlePlayerEnter(player); // Handle player enter event with player parameter
                     }
                 }
             }
@@ -113,12 +142,17 @@ public class PlayerTriggerModule extends Module {
         detectedPlayers.retainAll(currentPlayersInRange);
     }
 
-    private void handlePlayerEnter() {
+    private void handlePlayerEnter(PlayerEntity player) {
         // Reset message index when a new player enters the range
         messageIndex = 0;
 
         // Send the first message or continue cycle if a player was in the range previously
         sendNextMessage();
+
+        // Send message to Discord if the toggle is enabled, only when player first enters
+        if (sendToDiscord.get()) {
+            sendDiscordMessage(player.getName().getString());
+        }
     }
 
     private void sendNextMessage() {
@@ -128,14 +162,15 @@ public class PlayerTriggerModule extends Module {
             for (PlayerEntity player : playersInCycle) {
                 String playerName = player.getName().getString();
                 String message = messages.get().get(messageIndex).replace("{player}", playerName); // Replace placeholder
-                ChatUtils.sendPlayerMsg(message); // Send the message
+                if (sendToChat.get()) {
+                    ChatUtils.sendPlayerMsg(message); // Send the message to chat
+                }
             }
             messageIndex++; // Increment the message index
             timer = delay.get(); // Set the timer for the next message
         } else {
             // Check for new players in the next tick
             playersInCycle.clear(); // Clear cycle list to check for new players
-            handlePlayerEnter();
         }
     }
 
@@ -149,5 +184,39 @@ public class PlayerTriggerModule extends Module {
 
         // This will handle sending the next message in the cycle
         sendNextMessage();
+    }
+
+    private void sendDiscordMessage(String playerName) {
+        if (webhook != null) {
+            try {
+                DiscordWebhook.EmbedObject embed = new DiscordWebhook.EmbedObject()
+                    .setTitle("Player Entered Range")
+                    .setDescription(playerName + " has entered the range!")
+                    .setColor(Color.GREEN)
+                    .setThumbnail("https://cdn.discordapp.com/attachments/1209202131106537553/1272496116268793856/icon.png?ex=66bb2fdb&is=66b9de5b&hm=447d57b17be5d18584b84b82150b48ceb11f5ce438fcc723dea1ecc8c34916f2&");
+
+                webhook.addEmbed(embed);
+                webhook.execute(); // Send the message to Discord
+                webhook.clearEmbeds(); // Clear embeds after sending
+                LogUtils.info("Message sent to Discord: " + playerName + " has entered the range!");
+            } catch (IOException e) {
+                LogUtils.error("Failed to send message to Discord: " + e.getMessage());
+            }
+        }
+    }
+
+    // Method to load the webhook from a configuration file
+    private void loadWebhookFromFile() {
+        if (webhookFile.exists()) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(webhookFile))) {
+                String url = reader.readLine();
+                if (url != null && !url.isEmpty()) {
+                    webhook = new DiscordWebhook(url); // Initialize the webhook with the loaded URL
+                    LogUtils.info("Webhook URL loaded from file: " + url);
+                }
+            } catch (IOException e) {
+                LogUtils.error("Failed to load webhook URL from file: " + e.getMessage());
+            }
+        }
     }
 }
