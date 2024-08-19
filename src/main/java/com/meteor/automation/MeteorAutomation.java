@@ -1,5 +1,6 @@
 package com.meteor.automation;
 
+import com.meteor.automation.modules.PlayerTriggerModule;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.systems.modules.Category;
@@ -20,6 +21,7 @@ public class MeteorAutomation extends MeteorAddon {
         // Modules
         Modules.get().add(new DiscordNotifier());
         Modules.get().add(new MoveTriggerModule());
+        Modules.get().add(new PlayerTriggerModule());
     }
 
     @Override

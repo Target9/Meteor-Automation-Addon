@@ -31,7 +31,7 @@ public class MoveTriggerModule extends Module {
     private final Setting<List<String>> chatCommands = settings.getDefaultGroup().add(new StringListSetting.Builder()
         .name("chat-commands")
         .description("List of commands to execute upon movement.")
-        .defaultValue(List.of("You moved!")) // Sample command
+        .defaultValue(List.of("You moved!")) // Sample command or additional commands
         .build()
     );
 
@@ -56,11 +56,19 @@ public class MoveTriggerModule extends Module {
         .defaultValue(true)
         .build());
 
-    public Setting<Boolean> disableOnLeave = sgGeneral.add(new BoolSetting.Builder() // New setting to control module disable on leave
+    public Setting<Boolean> disableOnLeave = sgGeneral.add(new BoolSetting.Builder()
         .name("disable-on-leave")
         .description("Disable this module when the game is left.")
         .defaultValue(true) // Default is true, can adjust as needed
         .build());
+
+    @Override
+    public void onActivate() {
+        // Record the current position when the module is activated
+        if (mc.player != null) {
+            lastPosition = mc.player.getBlockPos(); // Set lastPosition to the player's current position
+        }
+    }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onTick(TickEvent.Post event) {
@@ -69,7 +77,7 @@ public class MoveTriggerModule extends Module {
             BlockPos currentPosition = player.getBlockPos(); // Get the player's current position
 
             // Check if the player has moved (by checking if the position has changed)
-            if (lastPosition == null || !currentPosition.equals(lastPosition)) {
+            if (!currentPosition.equals(lastPosition)) {
                 lastPosition = currentPosition; // Update last known position
 
                 // Check if messages should be sent to Discord
