@@ -112,7 +112,7 @@ public class MoveTriggerModule extends Module {
             try {
                 webhook.setContent(message);
                 webhook.execute(); // Send the message to Discord
-                LogUtils.info("Message sent to Discord: " + message); // Log the sent message
+                LogUtils.info("Message sent to Discord: " + message); // Log the message
             } catch (IOException e) {
                 LogUtils.error("Failed to send message to Discord: " + e.getMessage());
             }
