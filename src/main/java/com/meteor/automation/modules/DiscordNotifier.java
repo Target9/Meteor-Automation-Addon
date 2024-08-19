@@ -10,8 +10,6 @@ import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 
 import net.minecraft.client.gui.screen.DeathScreen;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
 import net.minecraft.entity.player.PlayerEntity; // For detecting players
 import net.minecraft.util.math.BlockPos;
 
@@ -28,8 +26,6 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.HashSet;
-import java.util.Set;
 
 public class DiscordNotifier extends Module {
 
@@ -38,14 +34,8 @@ public class DiscordNotifier extends Module {
 
     private DiscordWebhook hook; // Private hook variable
 
-    // Set to keep track of detected players
-    private final Set<PlayerEntity> detectedPlayers = new HashSet<>();
-
-    // Define a set of entity types to monitor
-    private final Set<EntityType<?>> entitiesToMonitor = new HashSet<>();
-
     // File to store the webhook URL
-    private final File configDirectory = new File(System.getProperty("user.home"), "DiscordNotifiers"); // Example for user directory
+    private final File configDirectory = new File(System.getProperty("user.home"), "DiscordNotifiers");
     private final File webhookFile = new File(configDirectory, "discord_webhook.txt"); // Use the newly created directory
 
     public SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -58,9 +48,6 @@ public class DiscordNotifier extends Module {
         if (!configDirectory.exists()) {
             configDirectory.mkdirs(); // Create the directory if it does not exist
         }
-
-        // Initialize the set with entity types you want to monitor
-        entitiesToMonitor.add(EntityType.PLAYER); // Adding PlayerEntity type to monitor
 
         // Load the webhook URL from the file if it exists
         loadWebhookFromFile();
@@ -77,13 +64,12 @@ public class DiscordNotifier extends Module {
         .description("Discord Webhook URL to send messages to")
         .defaultValue("")
         .onChanged(url -> {
-            if (!url.isEmpty()) {
-                // Save the new webhook URL to file
-                saveWebhookToFile(url);
-                hook = new DiscordWebhook(url);
+            if (url.isEmpty()) {
+                hook = null; // Set hook to null if the URL is empty
+                LogUtils.info("Webhook URL set to null."); // Inform about the change without revealing the URL
             } else {
-                LogUtils.info("Invalid webhook URL in DiscordNotifier");
-                this.toggle();
+                hook = new DiscordWebhook(url); // Set the valid URL to the webhook class
+                saveWebhookToFile(url); // Save the new webhook URL to file
             }
         })
         .build());
@@ -99,28 +85,6 @@ public class DiscordNotifier extends Module {
         .description("ID of the user to ping")
         .defaultValue("")
         .visible(() -> pingMode.get() == PingModes.User)
-        .build());
-
-    // Entity notifier settings
-    private final Setting<Boolean> entitiesNotifier = sgNotifs.add(new BoolSetting.Builder()
-        .name("player-notifier")
-        .description("Toggle notifications if a player is found.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<Boolean> ignoreFriends = sgNotifs.add(new BoolSetting.Builder()
-        .name("ignore-friends")
-        .description("If enabled, will not notify when friends enter/exit render distance.")
-        .defaultValue(true)
-        .visible(entitiesNotifier::get) // Visible only if entities notifier is enabled
-        .build());
-
-    private final Setting<Integer> renderDistance = sgNotifs.add(new IntSetting.Builder()
-        .name("render-distance")
-        .description("Maximum distance (in blocks) to notify for entity detection")
-        .sliderRange(1, 128)
-        .defaultValue(64)
-        .visible(entitiesNotifier::get) // Visible only if entities notifier is enabled
         .build());
 
     private final Setting<Boolean> stashNotifier = sgNotifs.add(new BoolSetting.Builder()
@@ -156,65 +120,24 @@ public class DiscordNotifier extends Module {
         loadWebhookFromFile();
     }
 
-    @EventHandler
-    private void onTick(TickEvent.Post event) {
-        if (!entitiesNotifier.get()) return; // Skip the tick if the entities notifier is off
+    @EventHandler(priority = EventPriority.HIGHEST)
+    private void onOpenScreen(OpenScreenEvent event) throws IOException {
+        assert mc.player != null;
+        if (hook == null) return;
 
-        for (Entity entity : mc.world.getEntities()) {
-            // Ensure that we are only checking for selected entities
-            if (!entitiesToMonitor.contains(entity.getType())) continue; // Now refers to our defined entities set
-            if (entity instanceof PlayerEntity player) { // Ensure it is a player
-                // Ignore notifications for yourself
-                if (player.equals(mc.player)) continue; // Skip if it's the player
-
-                // Check if the player is in creative mode or should not be attacked
-                if (player.isCreative() || (ignoreFriends.get() && !Friends.get().shouldAttack(player))) return;
-
-                // Check if the player is in range
-                if (mc.player.distanceTo(player) <= renderDistance.get()) {
-                    // If this player was not previously detected, notify the entry
-                    if (!detectedPlayers.contains(player)) {
-                        detectedPlayers.add(player); // Add player to the detected list
-                        try {
-                            notifyPlayerEnter(player); // Send notification
-                        } catch (IOException e) {
-                            LogUtils.error("Failed to send player notification: " + e.getMessage());
-                        }
-                    }
-                } else if (detectedPlayers.contains(player)) {
-                    // If the player goes out of render distance
-                    detectedPlayers.remove(player); // Remove from detected players list
-                    try {
-                        notifyPlayerExit(player); // Notify that the player has exited
-                    } catch (IOException e) {
-                        LogUtils.error("Failed to send player exit notification: " + e.getMessage());
-                    }
-                }
-            }
+        if (event.screen instanceof DeathScreen && deathNotifier.get()) {
+            BlockPos pos = mc.player.getBlockPos();
+            String posStr = "X: " + pos.getX() + " Y: " + pos.getY() + " Z: " + pos.getZ();
+            readyHook(hook);
+            hook.addEmbed(new DiscordWebhook.EmbedObject()
+                .setTitle("You have died! (" + mc.player.getName() + ")")
+                .setColor(Color.YELLOW)
+                .addField("Coordinates:", posStr, false)
+                .addField("Dimension:", PlayerUtils.getDimension().toString(), false)
+                .setThumbnail(avatar));
+            hook.execute();
+            hook.clearEmbeds();
         }
-    }
-
-    private void notifyPlayerEnter(PlayerEntity player) throws IOException {
-        String playerName = player.getName().getString();
-        readyHook(hook);
-        hook.addEmbed(new DiscordWebhook.EmbedObject()
-            .setTitle("Player Entered Render Distance: " + playerName)
-            .setColor(Color.GREEN)
-            .setThumbnail(avatar));
-
-        hook.execute();
-        hook.clearEmbeds();
-    }
-
-    private void notifyPlayerExit(PlayerEntity player) throws IOException {
-        String playerName = player.getName().getString();
-        readyHook(hook);
-        hook.addEmbed(new DiscordWebhook.EmbedObject()
-            .setTitle("Player Left Render Distance: " + playerName)
-            .setColor(Color.RED));
-
-        hook.execute();
-        hook.clearEmbeds();
     }
 
     @EventHandler
@@ -243,26 +166,6 @@ public class DiscordNotifier extends Module {
         }
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST)
-    private void onOpenScreen(OpenScreenEvent event) throws IOException {
-        assert mc.player != null;
-        if (hook == null) return;
-
-        if (event.screen instanceof DeathScreen && deathNotifier.get()) {
-            BlockPos pos = mc.player.getBlockPos();
-            String posStr = "X: " + pos.getX() + " Y: " + pos.getY() + " Z: " + pos.getZ();
-            readyHook(hook);
-            hook.addEmbed(new DiscordWebhook.EmbedObject()
-                .setTitle("You have died! (" + mc.player.getName() + ")")
-                .setColor(Color.YELLOW)
-                .addField("Coordinates:", posStr, false)
-                .addField("Dimension:", PlayerUtils.getDimension().toString(), false)
-                .setThumbnail(avatar));
-            hook.execute();
-            hook.clearEmbeds();
-        }
-    }
-
     private void readyHook(DiscordWebhook hook) {
         assert mc.player != null;
         if (hook == null) return;
@@ -282,7 +185,7 @@ public class DiscordNotifier extends Module {
     private void saveWebhookToFile(String url) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(webhookFile))) {
             writer.write(url);
-            LogUtils.info("Webhook URL saved to file: " + url);
+            LogUtils.info("Webhook URL saved to file."); // Change log output to not reveal the URL
         } catch (IOException e) {
             LogUtils.error("Failed to save webhook URL to file: " + e.getMessage());
         }
@@ -293,10 +196,9 @@ public class DiscordNotifier extends Module {
             try (BufferedReader reader = new BufferedReader(new FileReader(webhookFile))) {
                 String url = reader.readLine();
                 if (url != null && !url.isEmpty()) {
-                    // Set the loaded URL to the Setting group, assuming we have a method to set value correctly
-                    link.set(url);  // Use 'set' instead of 'setValue'
-                    hook = new DiscordWebhook(url);
-                    LogUtils.info("Webhook URL loaded from file: " + url);
+                    // Set the loaded URL to the Setting group without logging the URL
+                    link.set(url);
+                    hook = new DiscordWebhook(url); // Initialize the webhook only if valid
                 }
             } catch (IOException e) {
                 LogUtils.error("Failed to load webhook URL from file: " + e.getMessage());

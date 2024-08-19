@@ -15,6 +15,7 @@ import com.meteor.automation.MeteorAutomation;
 import com.meteor.automation.utils.LogUtils;
 import com.meteor.automation.utils.DiscordWebhook; // Import your DiscordWebhook class
 
+import java.awt.*;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
@@ -36,11 +37,22 @@ public class MoveTriggerModule extends Module {
     );
 
     // New toggle setting to control sending messages to Discord
-    public Setting<Boolean> sendToDiscord = settings.getDefaultGroup().add(new BoolSetting.Builder()
+    private final Setting<Boolean> sendToDiscord = settings.getDefaultGroup().add(new BoolSetting.Builder()
         .name("send-to-discord")
         .description("Toggle to send messages to Discord upon movement.")
         .defaultValue(true) // Default is true, can adjust as needed
         .build());
+
+    // New setting to control delay between chat messages
+    private final Setting<Integer> messageDelay = settings.getDefaultGroup().add(new IntSetting.Builder()
+        .name("message-delay")
+        .description("The delay between each chat message in ticks.")
+        .defaultValue(20) // Default to 20 ticks (1 second if 20 ticks per second)
+        .min(1)
+        .sliderMax(200)
+        .build());
+
+    private int chatTimer = 0; // Timer to manage delays between chat messages
 
     public MoveTriggerModule() {
         super(MeteorAutomation.UTILITY, "move-trigger", "Triggers actions when the player moves.");
@@ -72,6 +84,12 @@ public class MoveTriggerModule extends Module {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onTick(TickEvent.Post event) {
+        // Decrease the timer if it is active
+        if (chatTimer > 0) {
+            chatTimer--; // Decrease the timer
+            return; // Exit if still waiting
+        }
+
         if (mc.player != null) {
             PlayerEntity player = mc.player; // Get the player entity
             BlockPos currentPosition = player.getBlockPos(); // Get the player's current position
@@ -82,10 +100,10 @@ public class MoveTriggerModule extends Module {
 
                 // Check if messages should be sent to Discord
                 if (sendToDiscord.get()) {
-                    sendDiscordMessage(player.getName().getString() + " has moved!"); // Customize the message as needed
+                    sendDiscordMessage(player); // Send the embed message when the player moves
                 }
 
-                // Execute all commands immediately upon movement
+                // Execute all commands with delay upon movement
                 if (enableChatMessage.get()) {
                     sendAllChatCommands(); // Send commands when the player moves
                 }
@@ -94,10 +112,13 @@ public class MoveTriggerModule extends Module {
     }
 
     private void sendAllChatCommands() {
-        // Send all chat commands from the list
+        // Send all chat commands from the list with delay
         if (enableChatMessage.get() && !chatCommands.get().isEmpty()) {
             for (String command : chatCommands.get()) {
-                sendChatCommand(command); // Send each command
+                if (chatTimer <= 0) {
+                    sendChatCommand(command); // Send each command
+                    chatTimer = messageDelay.get(); // Reset timer based on delay setting
+                }
             }
         }
     }
@@ -107,12 +128,22 @@ public class MoveTriggerModule extends Module {
         MinecraftClient.getInstance().player.networkHandler.sendChatMessage(command); // Send the command
     }
 
-    private void sendDiscordMessage(String message) {
+    private void sendDiscordMessage(PlayerEntity player) {
         if (webhook != null) {
             try {
-                webhook.setContent(message);
+                // Create an embed message for Discord
+                DiscordWebhook.EmbedObject embed = new DiscordWebhook.EmbedObject()
+                    .setTitle("Movement Notification")
+                    .setDescription(player.getName().getString() + " has moved!")
+                    .setColor(Color.BLUE)
+                    .setThumbnail("https://cdn.discordapp.com/attachments/1209202131106537553/1272496116268793856/icon.png?ex=66bb2fdb&is=66b9de5b&hm=447d57b17be5d18584b84b82150b48ceb11f5ce438fcc723dea1ecc8c34916f2&") // Provide a valid thumbnail URL
+
+                    .setFooter("Movement detected in Minecraft", "https://cdn.discordapp.com/attachments/1209202131106537553/1272496116268793856/icon.png"); // Footer with icon
+
+                webhook.addEmbed(embed);
                 webhook.execute(); // Send the message to Discord
-                LogUtils.info("Message sent to Discord: " + message); // Log the message
+                LogUtils.info("Message sent to Discord: " + player.getName().getString() + " has moved!"); // Log the message
+                webhook.clearEmbeds(); // Clear embeds after sending
             } catch (IOException e) {
                 LogUtils.error("Failed to send message to Discord: " + e.getMessage());
             }
